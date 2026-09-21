@@ -1,0 +1,8 @@
+{
+  "holdSeconds": 1.2,
+  "movementTolerancePoints": 6,
+  "maximumHoldSeconds": 60,
+  "mode": "fn",
+  "shortcutKeyCode": 79,
+  "shortcutModifiers": []
+}

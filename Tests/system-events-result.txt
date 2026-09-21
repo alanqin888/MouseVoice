@@ -1,0 +1,39 @@
+EVENT t=651541.8698405417 配置已载入；点击启用开始测试
+EVENT t=651541.8711784167 应用启动；默认暂停，无权限弹窗，不发送按键
+EVENT t=651542.1584210834 监听已启用；原地长按左键 1.2 秒
+TEST started listener=true post=true
+MOUSE t=651542.1749828333 type=1
+PASS: short click armed FnEvents=0 elapsed=0.14177704160101712
+MOUSE t=651542.687960875 type=2
+PASS: short click released FnEvents=0 elapsed=0.04050174995791167
+PASS: short click never emits Fn
+MOUSE t=651544.0290470833 type=1
+PASS: drag gesture armed FnEvents=0 elapsed=0.020659124944359064
+MOUSE t=651544.0498413334 type=6
+EVENT t=651544.0500105417 移动超过容差，本次手势已取消
+PASS: drag cancelled FnEvents=0 elapsed=0.020703208283521235
+MOUSE t=651544.070697 type=6
+PASS: drag out and back never emits Fn
+MOUSE t=651545.47172275 type=2
+PASS: drag released FnEvents=0 elapsed=0.020205500070005655
+MOUSE t=651545.693086 type=1
+EVENT t=651546.7335888334 外部 Fn down 已被监听（未确认语音）
+EVENT t=651546.8951375417 已发送 fn 开始事件（未确认语音启动）
+EVENT t=651546.9015283334 合成 Fn down 已被监听（未确认语音）
+PASS: stationary 1.2-second hold emits Fn down FnEvents=1 elapsed=1.2210493333404884
+MOUSE t=651546.9142934167 type=2
+EVENT t=651546.9149595833 已发送释放事件（未确认语音停止）
+EVENT t=651546.9163420834 合成 Fn up 已被监听（未确认语音）
+PASS: mouse up emits Fn up FnEvents=2 elapsed=0.020568583393469453
+MOUSE t=651547.2359197084 type=1
+EVENT t=651548.4390422917 已发送 fn 开始事件（未确认语音启动）
+EVENT t=651548.4457769584 合成 Fn down 已被监听（未确认语音）
+PASS: second hold emits Fn down FnEvents=3 elapsed=1.220193749992177
+MOUSE t=651548.456554375 type=6
+EVENT t=651548.4572256667 移动超过容差，本次手势已取消
+EVENT t=651548.46252175 合成 Fn up 已被监听（未确认语音）
+PASS: active drag emits Fn up FnEvents=4 elapsed=0.020256958319805562
+MOUSE t=651548.4769110001 type=2
+PASS: all keys released FnEvents=4 elapsed=0.021051333285868168
+MOUSE t=651548.498075875 type=2
+RESULT PASS: sequential global-event integration test

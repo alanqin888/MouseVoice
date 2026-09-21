@@ -1,0 +1,6 @@
+# Build products
+MouseVoice.app/
+MouseVoice.app.zip
+
+# macOS
+.DS_Store
