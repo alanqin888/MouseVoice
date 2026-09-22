@@ -1,7 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
-DESTINATION="$PWD/MouseVoice.app"
 STAGING="$(mktemp -d "${TMPDIR:-/tmp}/mousevoice-build.XXXXXX")"
 trap 'rm -rf "$STAGING"' EXIT
 APP="$STAGING/MouseVoice.app"
@@ -17,7 +16,4 @@ codesign --force --sign - --identifier local.alan.MouseVoice "$APP"
 codesign --verify --deep --strict "$APP"
 # Keep a clean signed copy: File Provider may reattach metadata after copying a .app.
 ditto -c -k --norsrc --noextattr --keepParent "$APP" "$PWD/MouseVoice.app.zip"
-ditto --norsrc --noextattr "$APP" "$DESTINATION"
-# File Provider may attach FinderInfo to a bundle copied into Documents.
-xattr -d com.apple.FinderInfo "$DESTINATION" 2>/dev/null || true
-printf 'Built: %s\nClean signed archive: %s\n' "$DESTINATION" "$PWD/MouseVoice.app.zip"
+printf 'Clean signed archive: %s\n' "$PWD/MouseVoice.app.zip"

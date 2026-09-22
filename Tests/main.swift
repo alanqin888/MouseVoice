@@ -65,5 +65,5 @@ check((try? config.validate()) == nil, "Invalid duration rejected")
 config = Configuration(); config.shortcutKeyCode = 63
 check((try? config.validate()) == nil, "Fn must use dedicated mode")
 let roundtrip = try JSONDecoder().decode(Configuration.self, from: JSONEncoder().encode(Configuration()))
-check(roundtrip.mode == .fn && roundtrip.holdSeconds == 1.2, "Configuration round trip")
+check(roundtrip.mode == .fn && roundtrip.holdSeconds == 0.5, "Configuration round trip")
 print("PASS: \(assertions) assertions; no synthetic input posted and no permissions requested.")

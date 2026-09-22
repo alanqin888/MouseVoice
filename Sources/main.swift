@@ -13,11 +13,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let statusLine = NSMenuItem(title: "已暂停", action: nil, keyEquivalent: "")
     let permissionLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let modeLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    let evidenceLine = NSMenuItem(title: "合成 Fn 回读：0 次（不代表语音启动）", action: nil, keyEquivalent: "")
-    let toggleItem = NSMenuItem(title: "启用（开始测试）", action: #selector(toggleEnabled), keyEquivalent: "")
+    let evidenceLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let toggleItem = NSMenuItem(title: "启用", action: #selector(toggleEnabled), keyEquivalent: "")
+    var holdItems: [(Double, NSMenuItem)] = []
     var config = Configuration()
     var configValid = false
-    var detector = HoldDetector(delay: 1.2, tolerance: 6)
+    var detector = HoldDetector(delay: 0.5, tolerance: 6)
     let output = KeyOutput()
     var tap: CFMachPort?
     var runLoopSource: CFRunLoopSource?
@@ -32,30 +33,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var smokeTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let identifier = Bundle.main.bundleIdentifier,
+           NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
+            .contains(where: { $0.processIdentifier != getpid() }) {
+            NSApplication.shared.terminate(nil)
+            return
+        }
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "MV ○"
-        item.button?.toolTip = "MouseVoice：长按左键测试语音快捷键"
+        item.button?.image = makeStatusImage()
+        item.button?.toolTip = "MouseVoice · 长按左键开始语音"
         menu.delegate = self
         menu.autoenablesItems = false
-        for line in [statusLine, permissionLine, modeLine, evidenceLine] {
-            line.isEnabled = false
-            menu.addItem(line)
-        }
+        statusLine.isEnabled = false
+        menu.addItem(statusLine)
         menu.addItem(.separator())
         toggleItem.target = self
         menu.addItem(toggleItem)
-        add("申请输入监控权限", #selector(requestListening))
-        add("申请辅助功能权限", #selector(requestPosting))
-        add("打开隐私与安全性设置", #selector(openPrivacy))
+        let speedMenu = NSMenu()
+        for seconds in [0.3, 0.5, 0.8, 1.2] {
+            let entry = NSMenuItem(title: String(format: "%.1f 秒", seconds),
+                                   action: #selector(changeHoldTime(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = seconds
+            speedMenu.addItem(entry)
+            holdItems.append((seconds, entry))
+        }
+        let speedItem = NSMenuItem(title: "长按时间", action: nil, keyEquivalent: "")
+        speedItem.submenu = speedMenu
+        menu.addItem(speedItem)
         menu.addItem(.separator())
-        add("Fn 模式（默认实验）", #selector(selectFn))
-        add("快捷键：按住 / 松开", #selector(selectHold))
-        add("快捷键：开始 / 结束各点一次", #selector(selectToggle))
-        add("打开配置文件", #selector(openConfiguration))
-        add("重新载入配置（会暂停）", #selector(reloadConfiguration))
-        add("复制诊断记录", #selector(copyDiagnostics))
+        let settingsMenu = NSMenu()
+        for line in [permissionLine, modeLine, evidenceLine] {
+            line.isEnabled = false
+            settingsMenu.addItem(line)
+        }
+        settingsMenu.addItem(.separator())
+        add("申请输入监控权限", #selector(requestListening), to: settingsMenu)
+        add("申请辅助功能权限", #selector(requestPosting), to: settingsMenu)
+        add("打开系统权限设置", #selector(openPrivacy), to: settingsMenu)
+        settingsMenu.addItem(.separator())
+        add("Fn 模式", #selector(selectFn), to: settingsMenu)
+        add("快捷键：按住 / 松开", #selector(selectHold), to: settingsMenu)
+        add("快捷键：开始 / 结束各点一次", #selector(selectToggle), to: settingsMenu)
+        add("打开配置文件", #selector(openConfiguration), to: settingsMenu)
+        add("重新载入配置", #selector(reloadConfiguration), to: settingsMenu)
+        add("复制诊断记录", #selector(copyDiagnostics), to: settingsMenu)
+        let settingsItem = NSMenuItem(title: "设置与诊断", action: nil, keyEquivalent: "")
+        settingsItem.submenu = settingsMenu
+        menu.addItem(settingsItem)
         menu.addItem(.separator())
-        add("退出并释放模拟按键", #selector(quit))
+        add("退出 MouseVoice", #selector(quit), to: menu)
         item.menu = menu
         reloadConfiguration()
         let center = NSWorkspace.shared.notificationCenter
@@ -84,10 +111,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    func add(_ title: String, _ selector: Selector) {
+    func makeStatusImage() -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 18))
+        image.lockFocus()
+        NSColor.black.setStroke()
+        let mouse = NSBezierPath(roundedRect: NSRect(x: 4.5, y: 3.5, width: 9, height: 13),
+                                 xRadius: 4.5, yRadius: 4.5)
+        mouse.lineWidth = 1.5
+        mouse.stroke()
+        let wheel = NSBezierPath()
+        wheel.lineWidth = 1.4
+        wheel.lineCapStyle = .round
+        wheel.move(to: NSPoint(x: 9, y: 13.1))
+        wheel.line(to: NSPoint(x: 9, y: 10.7))
+        wheel.stroke()
+        let wave = NSBezierPath()
+        wave.lineWidth = 1.2
+        wave.lineCapStyle = .round
+        wave.move(to: NSPoint(x: 6.7, y: 7.5))
+        wave.line(to: NSPoint(x: 7.7, y: 8.8))
+        wave.line(to: NSPoint(x: 8.7, y: 6.8))
+        wave.line(to: NSPoint(x: 9.7, y: 8.8))
+        wave.line(to: NSPoint(x: 11.2, y: 7.5))
+        wave.stroke()
+        image.unlockFocus()
+        image.isTemplate = true
+        return image
+    }
+
+    func add(_ title: String, _ selector: Selector, to destination: NSMenu) {
         let entry = NSMenuItem(title: title, action: selector, keyEquivalent: "")
         entry.target = self
-        menu.addItem(entry)
+        destination.addItem(entry)
     }
 
     func record(_ message: String) {
@@ -101,9 +156,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menuOpen = true
         // A long press inside this application's menu should not activate voice.
         cancelGesture("打开菜单，当前手势取消")
+        statusLine.title = enabled ? "已开启 · 长按 \(config.holdSeconds) 秒" : "已暂停"
         permissionLine.title = "输入监控：\(CGPreflightListenEventAccess() ? "已允许" : "未允许") · 发送：\(CGPreflightPostEventAccess() ? "已允许" : "未允许")"
-        modeLine.title = "\(config.mode.rawValue) · \(config.holdSeconds) 秒 · \(config.movementTolerancePoints) 点"
+        modeLine.title = "输出方式：\(config.mode.rawValue)"
         evidenceLine.title = "合成 Fn 回读：\(fnEchoes) 次（不代表语音启动）"
+        for (seconds, entry) in holdItems { entry.state = abs(config.holdSeconds - seconds) < 0.001 ? .on : .off }
     }
 
     func menuDidClose(_ menu: NSMenu) { menuOpen = false }
@@ -115,6 +172,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func openConfiguration() { NSWorkspace.shared.open(configURL) }
+
+    @objc func changeHoldTime(_ sender: NSMenuItem) {
+        guard let seconds = sender.representedObject as? Double, configValid else { return }
+        let wasEnabled = enabled
+        var candidate = config
+        candidate.holdSeconds = seconds
+        do {
+            try save(candidate)
+            reloadConfiguration()
+            if wasEnabled { toggleEnabled() }
+        } catch { record("保存长按时间失败：\(error.localizedDescription)") }
+    }
 
     @objc func reloadConfiguration() {
         disable()
@@ -181,8 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         enabled = true
-        toggleItem.title = "暂停并释放模拟按键"
-        item.button?.title = "MV ●"
+        toggleItem.title = "暂停"
         record("监听已启用；原地长按左键 \(config.holdSeconds) 秒")
     }
 
@@ -239,7 +307,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
             activeSince = ProcessInfo.processInfo.systemUptime
-            item.button?.title = "MV ↑"
             record("已发送 \(config.mode.rawValue) 开始事件（未确认语音启动）")
             let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
                 guard let self else { return }
@@ -253,7 +320,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .end:
             output.end()
             watchdog?.invalidate(); watchdog = nil
-            item.button?.title = enabled ? "MV ●" : "MV ○"
         }
     }
 
@@ -262,7 +328,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         watchdog?.invalidate(); watchdog = nil
         _ = detector.reset()
         output.end()
-        item?.button?.title = enabled ? "MV ●" : "MV ○"
         if let reason { record(reason) }
     }
 
@@ -273,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let tap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap) }
         runLoopSource = nil
         tap = nil
-        toggleItem.title = "启用（开始测试）"
+        toggleItem.title = "启用"
     }
 
     @objc func sessionInterrupted() { disable(); record("休眠或会话切换，已暂停并释放") }

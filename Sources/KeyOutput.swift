@@ -4,7 +4,7 @@ import CoreGraphics
 enum OutputMode: String, Codable { case fn, shortcutHold, shortcutToggle }
 
 struct Configuration: Codable {
-    var holdSeconds: Double = 1.2
+    var holdSeconds: Double = 0.5
     var movementTolerancePoints: Double = 6
     var maximumHoldSeconds: Double = 60
     var mode: OutputMode = .fn
