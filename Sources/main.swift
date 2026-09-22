@@ -97,8 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             source.resume()
             signalSources.append(source)
         }
-        record("应用启动；默认暂停，无权限弹窗，不发送按键")
-        if CommandLine.arguments.contains("--enable") {
+        record("应用启动；读取上次启用状态")
+        if CommandLine.arguments.contains("--enable") ||
+            (UserDefaults.standard.bool(forKey: "enabledOnLaunch") && !CommandLine.arguments.contains("--smoke-test")) {
             if !CGPreflightPostEventAccess() { requestPosting() }
             if !CGPreflightListenEventAccess() { requestListening() }
             toggleEnabled()
@@ -223,7 +224,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func selectToggle() { select(.shortcutToggle) }
 
     @objc func toggleEnabled() {
-        if enabled { disable(); record("已暂停"); return }
+        if enabled {
+            disable()
+            UserDefaults.standard.set(false, forKey: "enabledOnLaunch")
+            record("已暂停")
+            return
+        }
         guard configValid else { record("配置无效，请修复后重新载入"); return }
         guard CGPreflightPostEventAccess() else { record("请先授予辅助功能 / 事件发送权限"); return }
         guard CGPreflightListenEventAccess() || AXIsProcessTrusted() else {
@@ -250,6 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         enabled = true
+        UserDefaults.standard.set(true, forKey: "enabledOnLaunch")
         toggleItem.title = "暂停"
         record("监听已启用；原地长按左键 \(config.holdSeconds) 秒")
     }
