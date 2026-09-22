@@ -7,7 +7,7 @@ let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/MouseVoice", isDirectory: true)
 let configURL = supportDirectory.appendingPathComponent("config.json")
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var item: NSStatusItem!
     let menu = NSMenu()
     let statusLine = NSMenuItem(title: "已暂停", action: nil, keyEquivalent: "")
@@ -26,7 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var watchdog: Timer?
     var activeSince: Double = 0
     var enabled = false
+    var resumeAfterInterruption = false
+    var interruptionReasons = Set<String>()
     var menuOpen = false
+    var isSuppressingVoiceDrag = false
     var fnEchoes = 0
     var log: [String] = []
     var signalSources: [DispatchSourceSignal] = []
@@ -88,6 +91,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(sessionInterrupted), name: NSWorkspace.willSleepNotification, object: nil)
         center.addObserver(self, selector: #selector(sessionInterrupted), name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        center.addObserver(self, selector: #selector(sessionResumed), name: NSWorkspace.didWakeNotification, object: nil)
+        center.addObserver(self, selector: #selector(sessionResumed), name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(sessionResumed),
+            name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(sessionInterrupted),
             name: NSNotification.Name("com.apple.screenIsLocked"), object: nil)
         for number in [SIGTERM, SIGINT] {
@@ -224,6 +231,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func selectToggle() { select(.shortcutToggle) }
 
     @objc func toggleEnabled() {
+        if !interruptionReasons.isEmpty {
+            resumeAfterInterruption.toggle()
+            UserDefaults.standard.set(resumeAfterInterruption, forKey: "enabledOnLaunch")
+            record(resumeAfterInterruption ? "解锁或唤醒后恢复" : "已暂停，不自动恢复")
+            return
+        }
         if enabled {
             disable()
             UserDefaults.standard.set(false, forKey: "enabledOnLaunch")
@@ -238,13 +251,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let mask = [CGEventType.leftMouseDown, .leftMouseUp, .leftMouseDragged, .flagsChanged]
             .reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
         // Observe before the system/input method consumes Fn. A session-level tap
-        // can miss Fn even when posting succeeded (verified on this Mac).
+        // can miss Fn even when posting succeeded (verified on this Mac). This
+        // is an active tap only after voice starts: it discards drag events so
+        // macOS does not turn a voice hold into text selection.
         tap = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap,
-            options: .listenOnly, eventsOfInterest: mask, callback: { _, type, event, context in
+            options: .defaultTap, eventsOfInterest: mask, callback: { _, type, event, context in
                 if let context {
-                    Unmanaged<AppDelegate>.fromOpaque(context).takeUnretainedValue().handle(type, event)
+                    let delegate = Unmanaged<AppDelegate>.fromOpaque(context).takeUnretainedValue()
+                    if delegate.handle(type, event) { return nil }
                 }
-                return Unmanaged.passUnretained(event) // Never swallow or rewrite the mouse event.
+                return Unmanaged.passUnretained(event)
             }, userInfo: Unmanaged.passUnretained(self).toOpaque())
         guard let tap, let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             if let tap { CFMachPortInvalidate(tap) }
@@ -261,29 +277,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         record("监听已启用；原地长按左键 \(config.holdSeconds) 秒")
     }
 
-    func handle(_ type: CGEventType, _ event: CGEvent) {
+    /// Returns true only when an active voice gesture owns the drag stream.
+    func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             cancelGesture("监听中断，已释放；等待下次点击")
             if enabled, let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            return
+            return false
         }
         if type == .flagsChanged {
-            guard event.getIntegerValueField(.keyboardEventKeycode) == 63 else { return }
+            guard event.getIntegerValueField(.keyboardEventKeycode) == 63 else { return false }
             let ours = event.getIntegerValueField(.eventSourceUserData) == KeyOutput.marker
             if ours { fnEchoes += 1 }
             record("\(ours ? "合成" : "外部") Fn \(event.flags.contains(.maskSecondaryFn) ? "down" : "up") 已被监听（未确认语音）")
-            return
+            return false
         }
-        guard enabled, event.getIntegerValueField(.eventSourceUserData) != KeyOutput.marker else { return }
+        guard enabled, event.getIntegerValueField(.eventSourceUserData) != KeyOutput.marker else { return false }
         switch type {
         case .leftMouseDown:
+            isSuppressingVoiceDrag = false
             cancelGesture(nil)
-            guard !menuOpen else { return }
+            guard !menuOpen else { return false }
             detector.down(at: event.location, now: ProcessInfo.processInfo.systemUptime)
             let timer = Timer(timeInterval: config.holdSeconds, repeats: false) { [weak self] _ in self?.deadline() }
             deadlineTimer = timer
             RunLoop.main.add(timer, forMode: .common)
         case .leftMouseDragged:
+            if output.active {
+                if !isSuppressingVoiceDrag {
+                    isSuppressingVoiceDrag = true
+                    record("语音进行中，已忽略拖动以防止选择文本")
+                }
+                return true
+            }
             let previous = detector.state
             apply(detector.move(to: event.location))
             if detector.state == .cancelled && previous != .cancelled {
@@ -292,8 +317,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         case .leftMouseUp:
             cancelGesture(output.active ? "已发送释放事件（未确认语音停止）" : nil)
+            isSuppressingVoiceDrag = false
         default: break
         }
+        return false
     }
 
     func deadline() {
@@ -335,6 +362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         watchdog?.invalidate(); watchdog = nil
         _ = detector.reset()
         output.end()
+        isSuppressingVoiceDrag = false
         if let reason { record(reason) }
     }
 
@@ -348,7 +376,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toggleItem.title = "启用"
     }
 
-    @objc func sessionInterrupted() { disable(); record("休眠或会话切换，已暂停并释放") }
+    @objc func sessionInterrupted(_ notification: Notification) {
+        if interruptionReasons.isEmpty { resumeAfterInterruption = enabled }
+        let reason = notification.name == NSWorkspace.willSleepNotification ? "sleep" :
+            (notification.name == NSWorkspace.sessionDidResignActiveNotification ? "session" : "lock")
+        interruptionReasons.insert(reason)
+        disable()
+        record("休眠或锁屏，已释放；返回后恢复原开关状态")
+    }
+
+    @objc func sessionResumed(_ notification: Notification) {
+        let reason = notification.name == NSWorkspace.didWakeNotification ? "sleep" :
+            (notification.name == NSWorkspace.sessionDidBecomeActiveNotification ? "session" : "lock")
+        interruptionReasons.remove(reason)
+        guard interruptionReasons.isEmpty, resumeAfterInterruption, !enabled else { return }
+        resumeAfterInterruption = false
+        toggleEnabled()
+    }
     @objc func copyDiagnostics() {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
         let text = "MouseVoice \(version)\nmacOS: \(ProcessInfo.processInfo.operatingSystemVersionString)\nlisten=\(CGPreflightListenEventAccess()) post=\(CGPreflightPostEventAccess()) AX=\(AXIsProcessTrusted())\nmode=\(config.mode.rawValue) enabled=\(enabled) fnEchoes=\(fnEchoes)\n" + log.joined(separator: "\n")

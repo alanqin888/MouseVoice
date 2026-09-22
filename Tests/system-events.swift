@@ -56,9 +56,9 @@ func activeDragTest() {
     mouse(.leftMouseDown)
     waitFor("second hold emits Fn down", { delegate.output.active && delegate.fnEchoes == 3 }) {
         mouse(.leftMouseDragged,20)
-        waitFor("active drag emits Fn up",timeout:1,{ !delegate.output.active && delegate.fnEchoes == 4 }) {
+        waitFor("active drag is swallowed without releasing Fn",timeout:1,{ delegate.output.active && delegate.fnEchoes == 3 }) {
             mouse(.leftMouseUp,20)
-            waitFor("all keys released",{delegate.detector.state == .idle}) { finish(0) }
+            waitFor("mouse up releases swallowed drag",{ !delegate.output.active && delegate.fnEchoes == 4 && delegate.detector.state == .idle }) { finish(0) }
         }
     }
 }
